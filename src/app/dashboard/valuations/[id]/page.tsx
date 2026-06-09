@@ -1,10 +1,14 @@
 import { redirect } from 'next/navigation'
-
-export const dynamic = 'force-dynamic'
 import Link from 'next/link'
 import { createClient } from '@/lib/supabase/server'
 import ValuationPending from '@/components/ValuationPending'
 import ValuationResult from '@/components/ValuationResult'
+
+export const dynamic = 'force-dynamic'
+
+// A row still pending/processing after this long is treated as failed, even if
+// the client that created it never stayed open long enough to time it out.
+const STALE_MS = 2 * 60 * 1000
 
 interface Props {
   params: Promise<{ id: string }>
@@ -27,6 +31,18 @@ export default async function ValuationDetailPage({ params }: Props) {
     redirect('/dashboard')
   }
 
+  // If a row has been stuck in pending/processing past the stale threshold,
+  // mark it as error now. This catches valuations whose client navigated away
+  // before the in-page timeout could fire. RLS-safe: it's the user's own row.
+  let status = valuation.status
+  if (
+    (status === 'pending' || status === 'processing') &&
+    Date.now() - new Date(valuation.created_at).getTime() > STALE_MS
+  ) {
+    await supabase.from('valuations').update({ status: 'error' }).eq('id', id)
+    status = 'error'
+  }
+
   return (
     <main className="min-h-screen bg-[#1A1A2E] px-4 py-12">
       <div className="mx-auto max-w-xl">
@@ -38,15 +54,15 @@ export default async function ValuationDetailPage({ params }: Props) {
           <span className="text-sm text-gray-300">Valuation</span>
         </div>
 
-        {(valuation.status === 'pending' || valuation.status === 'processing') && (
+        {(status === 'pending' || status === 'processing') && (
           <ValuationPending id={id} />
         )}
 
-        {valuation.status === 'complete' && (
+        {status === 'complete' && (
           <ValuationResult valuation={valuation} />
         )}
 
-        {valuation.status === 'error' && (
+        {status === 'error' && (
           <div className="flex flex-col items-center justify-center gap-4 py-20 text-center rounded-2xl bg-[#16213E] border border-white/10">
             <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/20">
               <svg className="h-7 w-7 text-red-400" fill="none" viewBox="0 0 24 24" stroke="currentColor" strokeWidth={2}>
