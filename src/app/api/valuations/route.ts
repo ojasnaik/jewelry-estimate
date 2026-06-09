@@ -1,15 +1,12 @@
 import { NextResponse, type NextRequest } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
-import { createClient } from '@/lib/supabase/server'
+import { requireAuth } from '@/lib/auth/requireAuth'
 
 export async function POST(request: NextRequest) {
   try {
-    const supabase = await createClient()
-    const { data: { user } } = await supabase.auth.getUser()
-
-    if (!user) {
-      return NextResponse.json({ error: 'Unauthorized' }, { status: 401 })
-    }
+    const auth = await requireAuth(request)
+    if (auth.response) return auth.response
+    const { user, supabase } = auth
 
     const body = await request.json()
     const { metal_type, karat, weight_grams, condition, gemstone_type, gemstone_carat, image_path } = body
