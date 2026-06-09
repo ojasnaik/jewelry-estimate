@@ -275,3 +275,19 @@ This project was built using Claude Code. Below is a condensed record of the pro
 > Create `src/lib/auth/requireAuth.ts` — centralised session verification for all API routes. Accept the request, call `getUser()`, return a discriminated union of `{ user, supabase, response: null }` on success or `{ response: NextResponse(401) }` on failure. Update all user-facing API routes to use it.
 
 **Claude:** Returned the `supabase` client alongside the user so routes don't create a second client. The discriminated union means TypeScript enforces the `if (auth.response) return auth.response` guard — forgetting it causes a type error when accessing `auth.user`. The `process/route.ts` route was intentionally excluded (server-to-server, guarded by `x-process-secret` instead).
+
+---
+
+### 14 — Stuck "estimating" on Vercel & poll timeout
+
+> The valuation is stuck on the estimating spinner in production. Where to look, and add a poll timeout.
+
+**Claude:** Added structured logging and Sentry breadcrumbs across the processing pipeline, awaited the previously fire-and-forget dispatch (un-awaited fetches are abandoned when a serverless function returns), and added a 60-second client-side poll timeout in `ValuationPending` that stops polling and marks the row `error` via a new `POST /api/valuations/[id]/timeout` route.
+
+---
+
+### 15 — Root cause: self-fetch blocked by Vercel Deployment Protection
+
+> The dispatch still fails — trace shows `POST /api/valuations/process` returning 401 in ~58 ms. Also, timed-out rows show "estimating" again on reopen.
+
+**Claude:** Diagnosed the 401 as **Vercel Deployment Protection** blocking the server-to-server self-fetch (no `_vercel_jwt` cookie on internal requests) — the request never reached the app, which explained the impossibly fast 58 ms and the 401 (the route itself only ever returns 403). Eliminated the self-fetch entirely: extracted the logic into `src/lib/valuations/processValuation.ts` and ran it via Next.js `after()` inside the create route (`maxDuration = 60`), removing base-URL, cookie, protection, and proxy concerns in one move. Slimmed `process/route.ts` to a thin secret-guarded retry wrapper. Fixed the persistence bug with a server-side staleness check on the result page — rows pending/processing past 2 minutes are marked `error` on load, so they self-heal even if the client navigated away before the in-page timeout fired.

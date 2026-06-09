@@ -1,12 +1,11 @@
-import { NextResponse, type NextRequest } from 'next/server'
+import { after, NextResponse, type NextRequest } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { requireAuth } from '@/lib/auth/requireAuth'
+import { processValuation } from '@/lib/valuations/processValuation'
 
-const getBaseUrl = () => {
-  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
-  if (process.env.NEXT_PUBLIC_VERCEL_URL) return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
-  return 'http://localhost:3000'
-}
+// Processing runs in after() within this invocation, so the function must be
+// allowed to live past the response long enough for the Groq call to finish.
+export const maxDuration = 60
 
 export async function POST(request: NextRequest) {
   try {
@@ -45,33 +44,10 @@ export async function POST(request: NextRequest) {
       throw insertError ?? new Error('Insert returned no data')
     }
 
-    // Await the dispatch so Vercel does not kill the in-flight request when
-    // this function returns. We only wait for the connection to be accepted
-    // (headers received), not for processing to complete.
-    try {
-      const dispatchRes = await fetch(`${getBaseUrl()}/api/valuations/process`, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          'x-process-secret': process.env.PROCESS_SECRET!,
-        },
-        body: JSON.stringify({ valuationId: valuation.id }),
-      })
-
-      if (!dispatchRes.ok) {
-        const errBody = await dispatchRes.text().catch(() => '(unreadable)')
-        Sentry.captureMessage('Dispatch to /api/valuations/process failed', {
-          level: 'error',
-          extra: { valuationId: valuation.id, status: dispatchRes.status, body: errBody },
-        })
-        console.error(`[valuations] dispatch failed status=${dispatchRes.status} body=${errBody}`)
-      } else {
-        console.log(`[valuations] dispatch accepted valuationId=${valuation.id}`)
-      }
-    } catch (dispatchErr) {
-      Sentry.captureException(dispatchErr, { extra: { valuationId: valuation.id } })
-      console.error('[valuations] dispatch threw', dispatchErr)
-    }
+    // Process in the background after the response is sent. No self-fetch —
+    // this runs in-process, avoiding base-URL resolution and Vercel
+    // Deployment Protection (which 401s server-to-server requests).
+    after(() => processValuation(valuation.id))
 
     return NextResponse.json({ id: valuation.id, status: 'pending' }, { status: 201 })
   } catch (err) {
