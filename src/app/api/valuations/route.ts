@@ -2,6 +2,12 @@ import { NextResponse, type NextRequest } from 'next/server'
 import * as Sentry from '@sentry/nextjs'
 import { requireAuth } from '@/lib/auth/requireAuth'
 
+const getBaseUrl = () => {
+  if (process.env.NEXT_PUBLIC_APP_URL) return process.env.NEXT_PUBLIC_APP_URL
+  if (process.env.NEXT_PUBLIC_VERCEL_URL) return `https://${process.env.NEXT_PUBLIC_VERCEL_URL}`
+  return 'http://localhost:3000'
+}
+
 export async function POST(request: NextRequest) {
   try {
     const auth = await requireAuth(request)
@@ -39,12 +45,11 @@ export async function POST(request: NextRequest) {
       throw insertError ?? new Error('Insert returned no data')
     }
 
-    const processUrl = new URL('/api/valuations/process', request.url).toString()
-    fetch(processUrl, {
+    fetch(`${getBaseUrl()}/api/valuations/process`, {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'x-process-secret': process.env.PROCESS_SECRET ?? '',
+        'x-process-secret': process.env.PROCESS_SECRET!,
       },
       body: JSON.stringify({ valuationId: valuation.id }),
     })
