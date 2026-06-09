@@ -3,6 +3,9 @@
 import { useEffect, useState } from 'react'
 import { useRouter } from 'next/navigation'
 
+const POLL_INTERVAL_MS = 3000
+const POLL_TIMEOUT_MS = 60_000 // stop polling after 60 seconds
+
 interface Props {
   id: string
 }
@@ -10,9 +13,21 @@ interface Props {
 export default function ValuationPending({ id }: Props) {
   const router = useRouter()
   const [failed, setFailed] = useState(false)
+  const [timedOut, setTimedOut] = useState(false)
 
   useEffect(() => {
+    const startedAt = Date.now()
+
     const interval = setInterval(async () => {
+      if (Date.now() - startedAt > POLL_TIMEOUT_MS) {
+        clearInterval(interval)
+        setTimedOut(true)
+        // Mark the row as error so revisiting the page shows the error card
+        // rather than spinning again.
+        fetch(`/api/valuations/${id}/timeout`, { method: 'POST' }).catch(() => {})
+        return
+      }
+
       try {
         const res = await fetch(`/api/valuations/${id}/status`)
         if (!res.ok) return
@@ -29,12 +44,12 @@ export default function ValuationPending({ id }: Props) {
       } catch {
         // transient network error — keep polling
       }
-    }, 3000)
+    }, POLL_INTERVAL_MS)
 
     return () => clearInterval(interval)
   }, [id, router])
 
-  if (failed) {
+  if (failed || timedOut) {
     return (
       <div className="flex flex-col items-center justify-center gap-4 py-20 text-center">
         <div className="flex h-14 w-14 items-center justify-center rounded-full bg-red-500/20">
@@ -43,7 +58,11 @@ export default function ValuationPending({ id }: Props) {
           </svg>
         </div>
         <p className="text-white font-medium">Estimation failed</p>
-        <p className="text-sm text-gray-400">Something went wrong during processing.</p>
+        <p className="text-sm text-gray-400">
+          {timedOut
+            ? 'Processing took too long. Please try again.'
+            : 'Something went wrong during processing.'}
+        </p>
         <a
           href="/dashboard/new"
           className="mt-2 inline-block rounded-lg bg-[#C9A84C] px-6 py-2.5 text-sm font-semibold text-black hover:bg-[#b8963e] transition"

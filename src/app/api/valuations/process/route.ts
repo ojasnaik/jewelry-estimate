@@ -35,6 +35,10 @@ function stripJsonFences(raw: string): string {
 export async function POST(request: NextRequest) {
   const secret = request.headers.get('x-process-secret')
   if (!secret || secret !== process.env.PROCESS_SECRET) {
+    Sentry.captureMessage('Process route called with invalid or missing secret', {
+      level: 'warning',
+      extra: { secretPresent: !!secret },
+    })
     return NextResponse.json({ error: 'Forbidden' }, { status: 403 })
   }
 
@@ -44,6 +48,9 @@ export async function POST(request: NextRequest) {
   try {
     ;({ valuationId } = await request.json())
     if (!valuationId) throw new Error('Missing valuationId')
+
+    console.log(`[process] starting valuationId=${valuationId}`)
+
     const { data: valuation, error: fetchError } = await supabase
       .from('valuations')
       .select('metal_type, karat, weight_grams, gemstone_type, gemstone_carat, condition')
@@ -58,6 +65,8 @@ export async function POST(request: NextRequest) {
       .from('valuations')
       .update({ status: 'processing' })
       .eq('id', valuationId)
+
+    console.log(`[process] calling Groq valuationId=${valuationId}`)
 
     const groqRes = await fetch('https://api.groq.com/openai/v1/chat/completions', {
       method: 'POST',
@@ -74,13 +83,20 @@ export async function POST(request: NextRequest) {
     })
 
     if (!groqRes.ok) {
-      throw new Error(`Groq API error: ${groqRes.status}`)
+      const groqError = await groqRes.text()
+      Sentry.captureMessage('Groq API error', {
+        level: 'error',
+        extra: { valuationId, status: groqRes.status, body: groqError },
+      })
+      throw new Error(`Groq API error: ${groqRes.status} — ${groqError}`)
     }
 
     const groqData = await groqRes.json()
     const rawContent: string = groqData.choices?.[0]?.message?.content ?? ''
-    const parsed = JSON.parse(stripJsonFences(rawContent))
 
+    console.log(`[process] Groq responded valuationId=${valuationId}`)
+
+    const parsed = JSON.parse(stripJsonFences(rawContent))
     const { estimated_low, estimated_high, reasoning } = parsed
 
     await supabase
@@ -93,9 +109,12 @@ export async function POST(request: NextRequest) {
       })
       .eq('id', valuationId)
 
+    console.log(`[process] complete valuationId=${valuationId}`)
+
     return NextResponse.json({ success: true }, { status: 200 })
   } catch (err) {
     Sentry.captureException(err, { extra: { valuationId } })
+    console.error(`[process] failed valuationId=${valuationId}`, err)
 
     if (valuationId) {
       await supabase

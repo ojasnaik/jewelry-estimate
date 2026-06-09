@@ -45,14 +45,33 @@ export async function POST(request: NextRequest) {
       throw insertError ?? new Error('Insert returned no data')
     }
 
-    fetch(`${getBaseUrl()}/api/valuations/process`, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-        'x-process-secret': process.env.PROCESS_SECRET!,
-      },
-      body: JSON.stringify({ valuationId: valuation.id }),
-    })
+    // Await the dispatch so Vercel does not kill the in-flight request when
+    // this function returns. We only wait for the connection to be accepted
+    // (headers received), not for processing to complete.
+    try {
+      const dispatchRes = await fetch(`${getBaseUrl()}/api/valuations/process`, {
+        method: 'POST',
+        headers: {
+          'Content-Type': 'application/json',
+          'x-process-secret': process.env.PROCESS_SECRET!,
+        },
+        body: JSON.stringify({ valuationId: valuation.id }),
+      })
+
+      if (!dispatchRes.ok) {
+        const errBody = await dispatchRes.text().catch(() => '(unreadable)')
+        Sentry.captureMessage('Dispatch to /api/valuations/process failed', {
+          level: 'error',
+          extra: { valuationId: valuation.id, status: dispatchRes.status, body: errBody },
+        })
+        console.error(`[valuations] dispatch failed status=${dispatchRes.status} body=${errBody}`)
+      } else {
+        console.log(`[valuations] dispatch accepted valuationId=${valuation.id}`)
+      }
+    } catch (dispatchErr) {
+      Sentry.captureException(dispatchErr, { extra: { valuationId: valuation.id } })
+      console.error('[valuations] dispatch threw', dispatchErr)
+    }
 
     return NextResponse.json({ id: valuation.id, status: 'pending' }, { status: 201 })
   } catch (err) {
