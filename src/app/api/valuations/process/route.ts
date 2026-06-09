@@ -97,10 +97,12 @@ export async function POST(request: NextRequest) {
   } catch (err) {
     Sentry.captureException(err, { extra: { valuationId } })
 
-    await supabase
-      .from('valuations')
-      .update({ status: 'error' })
-      .eq('id', valuationId)
+    if (valuationId) {
+      await supabase
+        .from('valuations')
+        .update({ status: 'error' })
+        .eq('id', valuationId)
+    }
 
     return NextResponse.json({ error: 'Processing failed' }, { status: 500 })
   }
