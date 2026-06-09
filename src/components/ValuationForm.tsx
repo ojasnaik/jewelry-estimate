@@ -2,6 +2,7 @@
 
 import { useState, useRef } from 'react'
 import { useRouter } from 'next/navigation'
+import * as Sentry from '@sentry/nextjs'
 import { createClient } from '@/lib/supabase/client'
 
 const METAL_KARATS: Record<string, string[]> = {
@@ -130,6 +131,7 @@ export default function ValuationForm({ userId }: Props) {
       const { id } = await res.json()
       router.push(`/dashboard/valuations/${id}`)
     } catch (err) {
+      Sentry.captureException(err)
       setSubmitError(err instanceof Error ? err.message : 'Something went wrong.')
       setLoading(false)
     }
