@@ -28,47 +28,6 @@ An AI-powered jewelry valuation web application. Users upload photos and enter d
 | Error tracking | Sentry |
 | Hosting | Vercel |
 
----
-
-## Project Structure
-
-```
-src/
-├── app/
-│   ├── auth/
-│   │   ├── login/page.tsx        # Sign-in form
-│   │   ├── signup/page.tsx       # Registration form
-│   │   └── callback/route.ts     # OAuth / magic-link callback
-│   ├── dashboard/
-│   │   ├── layout.tsx            # Nav bar, session guard, Sentry user context
-│   │   ├── page.tsx              # Valuation history table
-│   │   ├── new/page.tsx          # New valuation form page
-│   │   └── valuations/[id]/page.tsx  # Result / pending / error view
-│   ├── api/
-│   │   └── valuations/
-│   │       ├── route.ts              # POST — create valuation
-│   │       ├── process/route.ts      # POST — call Groq, update DB (internal)
-│   │       ├── [id]/status/route.ts  # GET — poll status
-│   │       └── [id]/image/route.ts   # GET — generate signed storage URL
-│   ├── global-error.tsx          # Global error boundary (Sentry + friendly UI)
-│   └── page.tsx                  # Root redirect (→ /dashboard or /auth/login)
-├── components/
-│   ├── ValuationForm.tsx          # Controlled form with image upload
-│   ├── ValuationPending.tsx       # Polling spinner, auto-refresh on complete
-│   ├── ValuationResult.tsx        # Price display, collapsible reasoning, image
-│   └── SignOutButton.tsx          # Client component for Supabase signOut
-├── lib/
-│   ├── auth/requireAuth.ts        # Centralised API route auth utility
-│   └── supabase/
-│       ├── client.ts              # Browser Supabase client (NEXT_PUBLIC_ only)
-│       └── server.ts              # Server Supabase client (cookies)
-├── types/
-│   ├── supabase.ts                # Generated Database types
-│   └── valuation.ts               # ValuationType = Tables<'valuations'>
-└── proxy.ts                       # Session refresh + route protection (Next.js 16)
-```
-
----
 
 ## Database Schema
 
@@ -93,51 +52,6 @@ create table valuations (
 ```
 
 Row Level Security is enabled. Users can only read and write their own rows.
-
----
-
-## Environment Variables
-
-Create a `.env.local` file at the project root:
-
-```
-NEXT_PUBLIC_SUPABASE_URL=
-NEXT_PUBLIC_SUPABASE_ANON_KEY=
-SUPABASE_SERVICE_ROLE_KEY=
-GROQ_API_KEY=
-PROCESS_SECRET=
-SENTRY_DSN=
-```
-
-**Security rules enforced in code:**
-- `SUPABASE_SERVICE_ROLE_KEY` is only used in `api/valuations/process/route.ts` (server-to-server)
-- `GROQ_API_KEY` is only used in `api/valuations/process/route.ts`
-- Client Components only read `NEXT_PUBLIC_` prefixed variables
-
----
-
-## Getting Started
-
-```bash
-npm install
-npm run dev
-```
-
-Open [http://localhost:3000](http://localhost:3000). The root redirects to `/auth/login` for unauthenticated users.
-
----
-
-## Key Architecture Decisions
-
-**`requireAuth` utility** — all user-facing API routes call `requireAuth(request)` at the top of the handler. It returns the verified `user` and `supabase` client together (one client per request), using a discriminated union so TypeScript enforces the early-return guard at the call site.
-
-**Fire-and-forget processing** — `POST /api/valuations` inserts the row and immediately returns `{ id, status: 'pending' }`. It fires a non-awaited `fetch` to `/api/valuations/process` with an `x-process-secret` header. The processing route calls Groq and updates the DB asynchronously, which allows the UI to navigate to the result page immediately and poll for completion.
-
-**`getUser()` everywhere** — `getSession()` is never used. `getUser()` re-validates the JWT with Supabase servers on every call, preventing spoofed cookie attacks.
-
-**`proxy.ts`** — Next.js 16 renamed `middleware.ts` to `proxy.ts` and the exported function from `middleware` to `proxy`. The file refreshes the session on every request and enforces route-level auth redirects.
-
-**`force-dynamic` on the result page** — the valuation detail page (`/dashboard/valuations/[id]`) exports `dynamic = 'force-dynamic'` so that `router.refresh()` called by `ValuationPending` always triggers a fresh DB read rather than hitting a cached render.
 
 ---
 
